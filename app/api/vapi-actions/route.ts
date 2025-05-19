@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server"
 import { headers } from "next/headers"
 import type { VapiCall } from "@/types/call"
+import type { VapiAssistant } from "@/types/assistant"
+import type { LogEntry, LogSession } from "@/types/logs"
 
 // Define the expected request body structures
 interface FunctionCall {
@@ -22,6 +24,8 @@ interface RequestBody {
   conversation?: any
   speech?: any
   status?: any
+  logs?: LogEntry[] // New field for logs
+  sessionId?: string // New field for log session ID
   // VAPI Call fields
   id?: string
   orgId?: string
@@ -57,15 +61,73 @@ interface RequestBody {
   transport?: any
   phoneCallProvider?: string
   phoneCallProviderId?: string
+  // VAPI Assistant fields
+  transcriber?: any
+  model?: any
+  voice?: any
+  firstMessage?: string
+  firstMessageInterruptionsEnabled?: boolean
+  firstMessageMode?: string
+  voicemailDetection?: any
+  clientMessages?: string[]
+  serverMessages?: string[]
+  silenceTimeoutSeconds?: number
+  maxDurationSeconds?: number
+  backgroundSound?: string
+  backgroundDenoisingEnabled?: boolean
+  modelOutputInMessagesEnabled?: boolean
+  transportConfigurations?: any[]
+  observabilityPlan?: any
+  credentials?: any[]
+  hooks?: any[]
+  compliancePlan?: any
+  metadata?: any
+  analysisPlan?: any
+  messagePlan?: any
+  startSpeakingPlan?: any
+  stopSpeakingPlan?: any
+  monitorPlan?: any
+  credentialIds?: string[]
+  server?: any
+  keypadInputPlan?: any
   [key: string]: any
 }
 
-// In-memory storage for calls and conversations
+// In-memory storage for calls, conversations, assistants, and logs
 let callsData: any[] = []
 let conversationsData: any[] = []
+let assistantsData: any[] = []
+let logSessions: LogSession[] = []
 
 // Get the secret from environment variables
 const VAPI_SECRET = process.env.VAPI_SECRET || ""
+
+// Parse log string into structured log entries
+function parseLogString(logString: string): LogEntry[] {
+  const lines = logString.trim().split("\n")
+  const entries: LogEntry[] = []
+
+  for (const line of lines) {
+    // Try to match the format: timestamp [TYPE] message
+    const match = line.match(/^(\d{2}:\d{2}:\d{2}:\d{3})\s+\[([A-Z]+)\]\s+(.+)$/)
+    if (match) {
+      entries.push({
+        timestamp: match[1],
+        type: match[2] as "LOG" | "WARN" | "ERROR" | "CHECKPOINT",
+        message: match[3],
+      })
+    } else {
+      // If it doesn't match the format, add it as a raw LOG entry
+      entries.push({
+        timestamp: new Date().toISOString(),
+        type: "LOG",
+        message: line,
+      })
+    }
+  }
+
+  return entries
+}
 
 export async function POST(request: Request) {
   try {
@@ -90,6 +152,70 @@ export async function POST(request: Request) {
 
     // Log the incoming webhook for debugging (remove sensitive data in production)
     console.log("Received webhook:", JSON.stringify(body, null, 2))
+
+    // Check if this is a log submission
+    if (body.logs || (typeof body.message === "string" && body.sessionId)) {
+      let logEntries: LogEntry[] = []
+
+      // If logs are provided as an array, use them directly
+      if (Array.isArray(body.logs)) {
+        logEntries = body.logs
+      }
+      // If message is a string, try to parse it as logs
+      else if (typeof body.message === "string") {
+        logEntries = parseLogString(body.message)
+      }
+
+      if (logEntries.length > 0) {
+        const sessionId = body.sessionId || `session-${Date.now()}`
+
+        // Check if we already have this session
+        const existingSessionIndex = logSessions.findIndex((session) => session.id === sessionId)
+
+        if (existingSessionIndex >= 0) {
+          // Update existing session
+          logSessions[existingSessionIndex].entries = [...logSessions[existingSessionIndex].entries, ...logEntries]
+        } else {
+          // Create new session
+          logSessions.push({
+            id: sessionId,
+            timestamp: new Date().toISOString(),
+            entries: logEntries,
+          })
+        }
+
+        // Keep only the last 20 sessions
+        logSessions = logSessions.slice(0, 20)
+
+        return NextResponse.json({ success: true, message: "Logs received" })
+      }
+    }
+
+    // Check if this is a VAPI assistant configuration
+    if (body.id && body.transcriber && body.model && body.voice) {
+      // This is a VAPI assistant configuration
+      const assistant: VapiAssistant = body as VapiAssistant
+
+      // Store the assistant data
+      const assistantInfo = {
+        id: assistant.id,
+        timestamp: assistant.updatedAt || assistant.createdAt || new Date().toISOString(),
+        type: "vapi-assistant",
+        data: assistant,
+      }
+
+      // Check if we already have this assistant
+      const existingIndex = assistantsData.findIndex((a) => a.id === assistant.id)
+      if (existingIndex >= 0) {
+        // Update existing assistant
+        assistantsData[existingIndex] = assistantInfo
+      } else {
+        // Add new assistant
+        assistantsData = [assistantInfo, ...assistantsData].slice(0, 100) // Keep only the last 100 assistants
+      }
+
+      return NextResponse.json({ success: true, message: "VAPI assistant configuration received" })
+    }
 
     // Check if this is a complete VAPI call record
     if (body.id && body.type && (body.type === "inboundPhoneCall" || body.type === "outboundPhoneCall")) {
@@ -189,6 +315,20 @@ export async function POST(request: Request) {
       } else if (body.message?.functionCall?.name === "getConversationsData") {
         // Return the stored conversations data
         return NextResponse.json({ result: conversationsData })
+      } else if (body.message?.functionCall?.name === "getAssistantsData") {
+        // Return the stored assistants data
+        return NextResponse.json({ result: assistantsData })
+      } else if (body.message?.functionCall?.name === "getLogSessions") {
+        // Return the stored log sessions
+        return NextResponse.json({ result: logSessions })
+      } else if (body.message?.functionCall?.name === "getLogSession") {
+        // Return a specific log session
+        const sessionId = body.message?.functionCall?.sessionId
+        if (sessionId) {
+          const session = logSessions.find((s) => s.id === sessionId)
+          return NextResponse.json({ result: session || null })
+        }
+        return NextResponse.json({ error: "Session ID is required" }, { status: 400 })
       }
     }
 

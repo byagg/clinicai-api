@@ -1,6 +1,8 @@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import CallsList from "@/components/calls-list"
 import ConversationsList from "@/components/conversations-list"
+import AssistantsList from "@/components/assistants-list"
+import LogsList from "@/components/logs-list"
 
 export default function Home() {
   return (
@@ -12,12 +14,20 @@ export default function Home() {
         <TabsList className="mb-4">
           <TabsTrigger value="conversations">Konverzácie</TabsTrigger>
           <TabsTrigger value="calls">Hovory</TabsTrigger>
+          <TabsTrigger value="assistants">Asistenti</TabsTrigger>
+          <TabsTrigger value="logs">Logy</TabsTrigger>
         </TabsList>
         <TabsContent value="conversations">
           <ConversationsList />
         </TabsContent>
         <TabsContent value="calls">
           <CallsList />
+        </TabsContent>
+        <TabsContent value="assistants">
+          <AssistantsList />
+        </TabsContent>
+        <TabsContent value="logs">
+          <LogsList />
         </TabsContent>
       </Tabs>
     </main>
