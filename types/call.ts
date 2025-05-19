@@ -14,5 +14,23 @@ export interface CallData {
 export interface Call {
   id: string
   timestamp: string
-  data: CallData
+  type: string
+  data: CallData | any
+}
+
+export interface ConversationData {
+  messages?: Array<{
+    role: string
+    content: string
+  }>
+  transcript?: string
+  status?: string
+  [key: string]: any
+}
+
+export interface Conversation {
+  id: string
+  timestamp: string
+  type: string
+  data: ConversationData | any
 }
