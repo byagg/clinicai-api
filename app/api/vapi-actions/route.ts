@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server"
+import { headers } from "next/headers"
+import type { VapiCall } from "@/types/call"
 
 // Define the expected request body structures
 interface FunctionCall {
@@ -20,6 +22,41 @@ interface RequestBody {
   conversation?: any
   speech?: any
   status?: any
+  // VAPI Call fields
+  id?: string
+  orgId?: string
+  createdAt?: string
+  updatedAt?: string
+  costs?: any[]
+  messages?: any[]
+  phoneCallTransport?: string
+  status?: string
+  endedReason?: string
+  destination?: any
+  startedAt?: string
+  endedAt?: string
+  cost?: number
+  costBreakdown?: any
+  artifactPlan?: any
+  analysis?: any
+  monitor?: any
+  artifact?: any
+  assistantId?: string
+  assistant?: any
+  assistantOverrides?: any
+  squadId?: string
+  squad?: any
+  workflowId?: string
+  workflow?: any
+  phoneNumberId?: string
+  phoneNumber?: any
+  customerId?: string
+  customer?: any
+  name?: string
+  schedulePlan?: any
+  transport?: any
+  phoneCallProvider?: string
+  phoneCallProviderId?: string
   [key: string]: any
 }
 
@@ -27,13 +64,51 @@ interface RequestBody {
 let callsData: any[] = []
 let conversationsData: any[] = []
 
+// Get the secret from environment variables
+const VAPI_SECRET = process.env.VAPI_SECRET || ""
+
 export async function POST(request: Request) {
   try {
+    // Get headers
+    const headersList = headers()
+    const secretHeader = headersList.get("X-VAPI-SECRET")
+
     // Parse the JSON body
     const body: RequestBody = await request.json()
 
-    // Log the incoming webhook for debugging
+    // Check if this is a function call (which doesn't need secret validation)
+    const isFunctionCall = body.message?.type === "function-call"
+
+    // Validate the secret for webhook requests (not for function calls)
+    if (!isFunctionCall && VAPI_SECRET) {
+      // If a secret is configured but not provided or doesn't match
+      if (!secretHeader || secretHeader !== VAPI_SECRET) {
+        console.error("Invalid or missing X-VAPI-SECRET header")
+        return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+      }
+    }
+
+    // Log the incoming webhook for debugging (remove sensitive data in production)
     console.log("Received webhook:", JSON.stringify(body, null, 2))
+
+    // Check if this is a complete VAPI call record
+    if (body.id && body.type && (body.type === "inboundPhoneCall" || body.type === "outboundPhoneCall")) {
+      // This is a complete VAPI call record
+      const vapiCall: VapiCall = body as VapiCall
+
+      // Store the call data
+      const callInfo = {
+        id: vapiCall.id,
+        timestamp: vapiCall.createdAt || new Date().toISOString(),
+        type: "vapi-call",
+        data: vapiCall,
+      }
+
+      // Add to our in-memory storage
+      callsData = [callInfo, ...callsData].slice(0, 100) // Keep only the last 100 calls
+
+      return NextResponse.json({ success: true, message: "VAPI call data received" })
+    }
 
     // Handle different webhook types
     if (body.type) {
